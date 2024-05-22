@@ -1,0 +1,232 @@
+﻿--Calculation of number of sessions, number of purchases and conversion rate for each traffic source in 2024
+WITH n AS (
+SELECT traffic_source
+,COUNT(DISTINCT session_id) as n_sessions
+,SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as n_purchases
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01'
+GROUP BY traffic_source
+)
+
+
+SELECT traffic_source
+,n_sessions
+,n_purchases
+,ROUND(n_purchases/n_sessions*100, 2) as conv_rate
+,RANK() OVER(ORDER BY n_sessions DESC) as n_sessions_rank
+FROM n
+ORDER BY conv_rate DESC;
+
+
+-- Top 10 states with the largest number of purchases in 2024
+SELECT state
+,COUNT(*) as n_purchases
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE event_type = 'purchase' AND DATE(created_at) >= '2024-01-01'
+GROUP BY state
+ORDER BY n_purchases DESC
+LIMIT 10;
+
+
+-- Top 10 states with the largest number of purchases where the conversion is higher than the overall conversion of the site in 2024
+WITH n AS (
+SELECT state
+,(SELECT ROUND(SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) / COUNT(DISTINCT session_id) * 100, 2)
+ FROM `bigquery-public-data.thelook_ecommerce.events`
+ WHERE DATE(created_at) >= '2024-01-01') as site_conv
+,COUNT(DISTINCT session_id) as n_sessions
+,SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as n_purchases
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01'
+GROUP BY state
+)
+
+
+SELECT state
+,n_purchases
+,ROUND(n_purchases/n_sessions*100, 2) as conv_rate
+,site_conv
+FROM n
+WHERE n_purchases/n_sessions*100 > site_conv
+ORDER BY n_purchases DESC
+LIMIT 10;
+
+
+-- Top 3 popular product categories for top 3 states with higher the overall conversion of the site
+WITH r AS (SELECT e.state
+,COUNT(*) as n_items
+,p.category
+,RANK() OVER(partition by e.state ORDER BY COUNT(*) DESC) as rank_by_n_items
+FROM `bigquery-public-data.thelook_ecommerce.events` as e
+JOIN `bigquery-public-data.thelook_ecommerce.order_items` as o
+ON e.user_id = o.user_id
+JOIN `bigquery-public-data.thelook_ecommerce.products` as p
+ON o.product_id = p.id
+WHERE DATE(e.created_at) >= '2024-01-01'
+AND e.state IN ('Guangdong','California', 'Texas')
+AND e.event_type = 'purchase'
+GROUP BY e.state, p.category)
+
+
+SELECT state
+,category
+,rank_by_n_items
+FROM r
+WHERE rank_by_n_items <= 3
+ORDER BY state, r.n_items DESC;
+
+
+-- What browser do website visitors use the most in 2024?
+SELECT browser
+,ROUND(COUNT(DISTINCT session_id) / (SELECT COUNT(DISTINCT session_id)
+                             FROM `bigquery-public-data.thelook_ecommerce.events`
+                             WHERE DATE(created_at) >= '2024-01-01') * 100, 2) as percent_of_sessions
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01'
+GROUP BY browser
+ORDER BY percent_of_sessions DESC;
+
+
+-- What is the cancellation event percentage breakdown by browser type in 2024?
+SELECT browser
+,ROUND(SUM(CASE WHEN event_type = 'cancel' THEN 1 ELSE 0 END)/COUNT(DISTINCT session_id)*100, 2) as cancel_percentage
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01'
+GROUP BY browser
+ORDER BY cancel_percentage DESC;
+
+
+-- What steps do visitors typically take before the Cancel event in 2024?
+WITH cancel_event AS (
+SELECT session_id
+,sequence_number
+,event_type
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01' AND
+session_id in
+     (SELECT session_id
+     FROM `bigquery-public-data.thelook_ecommerce.events`
+     WHERE event_type = 'cancel')
+     )
+
+
+SELECT event_type
+,COUNT(*) as n_events
+,sequence_number
+FROM cancel_event
+GROUP BY event_type, sequence_number
+ORDER BY sequence_number;
+
+
+--What are the user paths or typical navigation patterns on the site in 2024?
+WITH user_paths AS (
+SELECT STRING_AGG(event_type, ' -> ' ORDER BY sequence_number) AS path
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01' AND session_id NOT IN
+                                          (SELECT DISTINCT session_id
+                                          FROM `bigquery-public-data.thelook_ecommerce.events`
+                                          WHERE DATE(created_at) BETWEEN '2023-12-01' AND '2023-12-31')
+GROUP BY session_id
+)
+
+
+SELECT path,
+COUNT(*) AS n_sessions
+FROM user_paths
+GROUP BY path
+ORDER BY n_sessions DESC;
+
+
+-- What is the cart abandonment rate in 2024?
+WITH user_paths AS (
+SELECT session_id
+,STRING_AGG(event_type, ' -> ' ORDER BY sequence_number) AS path
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01' AND session_id NOT IN
+                                         (SELECT DISTINCT session_id
+                                         FROM `bigquery-public-data.thelook_ecommerce.events`
+                                         WHERE DATE(created_at) BETWEEN '2023-12-01' AND '2023-12-31')
+GROUP BY session_id
+)
+
+
+SELECT
+ROUND((1- SUM(CASE WHEN path LIKE "%purchase%" THEN 1 ELSE 0 END) /
+SUM(CASE WHEN path LIKE "%cart%" THEN 1 ELSE 0 END))*100, 2) as cart_aband_rate
+FROM user_paths;
+
+
+-- What is the maximum, minimum and average duration of a session on the site?
+WITH session_durations AS (
+SELECT session_id
+,TIMESTAMP_DIFF(MAX(created_at), MIN(created_at), SECOND)/ 60.0 AS session_duration_min
+FROM `bigquery-public-data.thelook_ecommerce.events`
+GROUP BY session_id
+)
+
+
+SELECT ROUND(MAX(session_duration_min)) as longest_sessioin_min
+,ROUND(MIN(session_duration_min)) as shortest_session_min
+,ROUND(AVG(session_duration_min)) as avg_session_min
+FROM session_durations;
+
+
+-- Which traffic source had the highest percentage of sessions lasting less than a minute in 2024?
+WITH session_durations AS (
+SELECT session_id
+,traffic_source
+,TIMESTAMP_DIFF(MAX(created_at), MIN(created_at), SECOND)/ 60.0 AS session_duration_min
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01'
+GROUP BY session_id, traffic_source
+),
+
+
+all_traffic AS (
+SELECT traffic_source
+,COUNT(*) as count_all
+FROM session_durations
+GROUP BY traffic_source
+),
+
+
+min_traffic AS (
+SELECT traffic_source
+,COUNT(*) as count_min
+FROM session_durations
+WHERE session_duration_min = 0
+GROUP BY traffic_source
+)
+
+
+SELECT a.traffic_source
+,ROUND(count_min/count_all*100, 2) as min_duration_percent
+FROM all_traffic a
+JOIN min_traffic m
+ON a.traffic_source = m.traffic_source
+ORDER BY min_duration_percent DESC;
+
+
+-- Top 10 dates with the highest number of purchases on the site, along with the average number of orders per day in 2024
+SELECT DATE(created_at) AS date
+,COUNT(DISTINCT session_id) AS n_purchases
+,ROUND(AVG(COUNT(DISTINCT session_id)) OVER ()) AS avg_daily_purchases
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE DATE(created_at) >= '2024-01-01'AND event_type = 'purchase'
+GROUP BY date
+ORDER BY n_purchases DESC
+LIMIT 10;
+
+
+-- What percentage of visitors made more than one purchase over the entire time period?
+WITH repeat_purchases AS (
+SELECT user_id
+,COUNT(*) as n_purchases
+FROM `bigquery-public-data.thelook_ecommerce.events`
+WHERE user_id IS NOT NULL AND event_type = 'purchase'
+GROUP BY user_id
+ORDER BY n_purchases DESC)
+
+
+SELECT ROUND(SUM(CASE WHEN n_purchases > 1 THEN 1 ELSE 0 END)/COUNT(*) * 100, 2) as repeat_purchase_percent
+FROM repeat_purchases;
