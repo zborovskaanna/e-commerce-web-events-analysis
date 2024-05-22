@@ -1,8 +1,8 @@
-### Data Analysis of Events at The Look E-commerce Platform
+## Data Analysis of Events at The Look e-Commerce Platform
 
-Data Source: BigQuery Public Database 'The Look E-commerce'
+Data Source: BigQuery Public Database 'The Look e-Commerce'
 
-#### The project includes:
+### The project includes:
 
 - SQL queries using data aggregations, window functions, and CTE
 - Analysis of key e-Commerce site metrics such as conversion rate, cart abandonment rate, as well as traffic sources, typical user navigation patterns, and more
@@ -10,7 +10,7 @@ Data Source: BigQuery Public Database 'The Look E-commerce'
 
   ![dashboard](https://github.com/zborovskaanna/e-commerce-web-events-analysis/assets/104727963/260941a3-1154-4b70-9944-0550951527af)
 
-  #### Tech Stack
+  ### Tech Stack
 - SQL
 - BigQuery
 - Looker Studio
